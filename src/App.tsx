@@ -1,36 +1,167 @@
-import { GeoJSON, MapContainer, TileLayer } from 'react-leaflet'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { geoJSON } from 'leaflet'
+import type { Session } from '@supabase/supabase-js'
+import { CircleMarker, GeoJSON, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
 import eruvData from './data/eruv.geojson'
+import { supabase } from './lib/supabase'
 
-const ERUV_BOUNDS: [[number, number], [number, number]] = [
-  [-33.3692, -70.5292],
-  [-33.3452, -70.5092],
-]
+type Perfil = {
+  id: string
+  full_name: string
+  status: 'pending' | 'approved' | 'rejected'
+  is_admin: boolean
+}
 
-function featureStyle(feature: any) {
-  const kind = feature?.properties?.kind
+type Portico = {
+  id: string
+  code: string
+  name: string | null
+  latitude: number
+  longitude: number
+  description: string | null
+  active: boolean
+  sort_order: number
+}
 
-  if (kind === 'boundary') {
+function estiloTrazado(feature: any) {
+  const tipo = feature?.properties?.kind
+
+  if (tipo === 'boundary') {
     return {
-      color: '#23a8d7',
+      color: '#1aa7d7',
       weight: 4,
-      opacity: 0.95,
-      fillColor: '#23a8d7',
-      fillOpacity: 0.045,
+      opacity: 0.98,
+      fillOpacity: 0,
     }
   }
 
-  if (kind === 'critical') {
-    return { color: '#e44b34', weight: 7, opacity: 1 }
+  if (tipo === 'critical') {
+    return { color: '#df4935', weight: 8, opacity: 1 }
   }
 
-  if (kind === 'warning') {
-    return { color: '#f08a24', weight: 6, opacity: 1 }
+  if (tipo === 'warning') {
+    return { color: '#ed8124', weight: 7, opacity: 1 }
   }
 
-  return { color: '#5d6c65', weight: 3, opacity: 0.8, dashArray: '6 6' }
+  return { color: '#55645d', weight: 3, opacity: 0.75, dashArray: '7 7' }
+}
+
+function AjustarMapaAlEruv() {
+  const mapa = useMap()
+
+  useEffect(() => {
+    const limites = geoJSON(eruvData as any).getBounds()
+    if (limites.isValid()) {
+      mapa.fitBounds(limites, { padding: [28, 28], maxZoom: 16 })
+    }
+  }, [mapa])
+
+  return null
+}
+
+function textoEstadoCuenta(perfil: Perfil | null) {
+  if (!perfil) return 'Invitado'
+  if (perfil.is_admin) return 'Administrador'
+  if (perfil.status === 'approved') return 'Usuario aprobado'
+  if (perfil.status === 'rejected') return 'Acceso rechazado'
+  return 'Pendiente de aprobación'
 }
 
 export function App() {
+  const [sesion, setSesion] = useState<Session | null>(null)
+  const [perfil, setPerfil] = useState<Perfil | null>(null)
+  const [porticos, setPorticos] = useState<Portico[]>([])
+  const [modalAbierto, setModalAbierto] = useState(false)
+  const [modoAuth, setModoAuth] = useState<'ingresar' | 'registro'>('ingresar')
+  const [nombre, setNombre] = useState('')
+  const [correo, setCorreo] = useState('')
+  const [contrasena, setContrasena] = useState('')
+  const [mensajeAuth, setMensajeAuth] = useState('')
+  const [cargandoAuth, setCargandoAuth] = useState(false)
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSesion(data.session))
+    const { data } = supabase.auth.onAuthStateChange((_evento, nuevaSesion) => {
+      setSesion(nuevaSesion)
+    })
+    return () => data.subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    const cargarPorticos = async () => {
+      const { data } = await supabase
+        .from('porticos')
+        .select('id,code,name,latitude,longitude,description,active,sort_order')
+        .eq('active', true)
+        .order('sort_order')
+      setPorticos((data as Portico[] | null) ?? [])
+    }
+    cargarPorticos()
+  }, [])
+
+  useEffect(() => {
+    if (!sesion?.user?.id) {
+      setPerfil(null)
+      return
+    }
+
+    const cargarPerfil = async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id,full_name,status,is_admin')
+        .eq('id', sesion.user.id)
+        .maybeSingle()
+      setPerfil((data as Perfil | null) ?? null)
+    }
+    cargarPerfil()
+  }, [sesion])
+
+  const estadoGeneral = useMemo(() => {
+    if (porticos.length === 0) return 'En preparación'
+    return 'En revisión'
+  }, [porticos.length])
+
+  const enviarAuth = async (evento: FormEvent) => {
+    evento.preventDefault()
+    setMensajeAuth('')
+    setCargandoAuth(true)
+
+    try {
+      if (modoAuth === 'registro') {
+        const { error } = await supabase.auth.signUp({
+          email: correo.trim(),
+          password: contrasena,
+          options: {
+            data: { full_name: nombre.trim() },
+            emailRedirectTo: window.location.origin,
+          },
+        })
+        if (error) throw error
+        setMensajeAuth(
+          correo.trim().toLowerCase() === 'chechelnitzky@gmail.com'
+            ? 'Cuenta de administrador creada. Revisa tu correo si Supabase solicita confirmar la dirección.'
+            : 'Cuenta creada. Quedará pendiente de aprobación del administrador antes de poder revisar o reportar problemas.',
+        )
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: correo.trim(),
+          password: contrasena,
+        })
+        if (error) throw error
+        setModalAbierto(false)
+      }
+    } catch (error: any) {
+      setMensajeAuth(error?.message ?? 'No se pudo completar la operación.')
+    } finally {
+      setCargandoAuth(false)
+    }
+  }
+
+  const cerrarSesion = async () => {
+    await supabase.auth.signOut()
+    setPerfil(null)
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -38,44 +169,125 @@ export function App() {
           <p className="eyebrow">Eruv La Dehesa</p>
           <h1>Estado del Eruv</h1>
         </div>
-        <button className="login-button">Ingresar</button>
+
+        {sesion ? (
+          <div className="cuenta-activa">
+            <div>
+              <strong>{perfil?.full_name || sesion.user.email}</strong>
+              <span>{textoEstadoCuenta(perfil)}</span>
+            </div>
+            <button className="boton-secundario" onClick={cerrarSesion}>Cerrar sesión</button>
+          </div>
+        ) : (
+          <button className="login-button" onClick={() => setModalAbierto(true)}>Ingresar</button>
+        )}
       </header>
 
       <section className="status-card">
         <div>
-          <span className="status-pill">Vista pública · Guest</span>
-          <h2>Mapa del Eruv</h2>
+          <span className="status-pill">Vista pública · Invitado</span>
+          <h2>Mapa del Eruv de La Dehesa</h2>
           <p>
-            Puedes consultar libremente el trazado y el estado semanal. Para reportar alertas o revisar pórticos será necesario iniciar sesión con una cuenta aprobada.
+            Cualquier persona puede consultar el mapa y el estado. Para revisar un pórtico o reportar un problema hay que iniciar sesión con una cuenta aprobada.
           </p>
         </div>
-        <div className="status-placeholder">Trazado KMZ cargado</div>
+        <div className="estado-semanal">
+          <small>Estado semanal</small>
+          <strong>{estadoGeneral}</strong>
+        </div>
+      </section>
+
+      <section className="leyenda">
+        <span><i className="punto punto-verde" /> Eruv OK</span>
+        <span><i className="punto punto-gris" /> Sin revisar</span>
+        <span><i className="punto punto-naranjo" /> Pórtico con problemas</span>
+        <span><i className="punto punto-rojo" /> Eruv pasul</span>
       </section>
 
       <main className="map-wrap">
         <MapContainer
-          bounds={ERUV_BOUNDS}
-          boundsOptions={{ padding: [18, 18] }}
+          center={[-33.3567, -70.5193]}
+          zoom={14}
           scrollWheelZoom
           className="map"
+          maxZoom={20}
         >
+          <AjustarMapaAlEruv />
           <TileLayer
-            attribution='&copy; OpenStreetMap contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; OpenStreetMap contributors &copy; CARTO'
+            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+            maxZoom={20}
           />
           <GeoJSON
             data={eruvData as any}
-            style={featureStyle}
+            style={estiloTrazado}
             onEachFeature={(feature, layer) => {
-              const name = feature?.properties?.name
-              if (name) layer.bindTooltip(name)
+              const nombreElemento = feature?.properties?.name
+              if (nombreElemento) layer.bindTooltip(nombreElemento)
             }}
           />
+
+          {porticos.map((portico) => (
+            <CircleMarker
+              key={portico.id}
+              center={[portico.latitude, portico.longitude]}
+              radius={8}
+              pathOptions={{ color: '#69736e', fillColor: '#ffffff', fillOpacity: 1, weight: 3 }}
+            >
+              <Popup>
+                <strong>{portico.name || portico.code}</strong><br />
+                Estado: sin revisar
+                {portico.description ? <><br />{portico.description}</> : null}
+              </Popup>
+            </CircleMarker>
+          ))}
         </MapContainer>
+
         <div className="map-note">
-          Trazado importado desde tu KMZ original. La ubicación y numeración individual de los pórticos se afinará en la siguiente etapa.
+          Trazado georreferenciado desde el mapa original · La Dehesa, Lo Barnechea.
         </div>
       </main>
+
+      {modalAbierto && (
+        <div className="modal-fondo" onMouseDown={() => setModalAbierto(false)}>
+          <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+            <button className="modal-cerrar" onClick={() => setModalAbierto(false)} aria-label="Cerrar">×</button>
+            <div className="tabs-auth">
+              <button className={modoAuth === 'ingresar' ? 'activo' : ''} onClick={() => { setModoAuth('ingresar'); setMensajeAuth('') }}>Ingresar</button>
+              <button className={modoAuth === 'registro' ? 'activo' : ''} onClick={() => { setModoAuth('registro'); setMensajeAuth('') }}>Crear cuenta</button>
+            </div>
+
+            <h2>{modoAuth === 'ingresar' ? 'Ingresar al Eruv' : 'Solicitar acceso'}</h2>
+            <p className="modal-intro">
+              {modoAuth === 'ingresar'
+                ? 'Los usuarios aprobados pueden revisar pórticos y reportar problemas.'
+                : 'Las cuentas nuevas deben ser aprobadas por el administrador antes de poder hacer cambios.'}
+            </p>
+
+            <form onSubmit={enviarAuth} className="form-auth">
+              {modoAuth === 'registro' && (
+                <label>
+                  Nombre completo
+                  <input value={nombre} onChange={(e) => setNombre(e.target.value)} required />
+                </label>
+              )}
+              <label>
+                Correo electrónico
+                <input type="email" value={correo} onChange={(e) => setCorreo(e.target.value)} required />
+              </label>
+              <label>
+                Contraseña
+                <input type="password" value={contrasena} onChange={(e) => setContrasena(e.target.value)} minLength={6} required />
+              </label>
+              <button className="login-button boton-ancho" disabled={cargandoAuth}>
+                {cargandoAuth ? 'Procesando…' : modoAuth === 'ingresar' ? 'Ingresar' : 'Crear cuenta'}
+              </button>
+            </form>
+
+            {mensajeAuth && <div className="mensaje-auth">{mensajeAuth}</div>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
