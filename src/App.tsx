@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
 import { geoJSON } from 'leaflet'
 import type { Session } from '@supabase/supabase-js'
 import { CircleMarker, GeoJSON, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
@@ -44,6 +45,14 @@ function estiloTrazado(feature: any) {
   }
 
   return { color: '#55645d', weight: 3, opacity: 0.75, dashArray: '7 7' }
+}
+
+function nombreTramo(feature: any) {
+  const tipo = feature?.properties?.kind
+  if (tipo === 'boundary') return 'Límite del Eruv'
+  if (tipo === 'critical') return 'Tramo crítico del Eruv'
+  if (tipo === 'warning') return 'Tramo a revisar'
+  return 'Tramo del Eruv'
 }
 
 function AjustarMapaAlEruv() {
@@ -222,8 +231,7 @@ export function App() {
             data={eruvData as any}
             style={estiloTrazado}
             onEachFeature={(feature, layer) => {
-              const nombreElemento = feature?.properties?.name
-              if (nombreElemento) layer.bindTooltip(nombreElemento)
+              layer.bindTooltip(nombreTramo(feature))
             }}
           />
 
