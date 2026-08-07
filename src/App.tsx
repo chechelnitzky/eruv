@@ -76,6 +76,27 @@ function textoEstadoCuenta(perfil: Perfil | null) {
   return 'Pendiente de aprobación'
 }
 
+function PantallaCuentaActivada({ esAdmin }: { esAdmin: boolean }) {
+  return (
+    <div className="activacion-pagina">
+      <div className="activacion-tarjeta">
+        <div className="activacion-icono">✓</div>
+        <p className="eyebrow">Eruv La Dehesa</p>
+        <h1>Tu cuenta ya fue activada</h1>
+        <p>
+          Tu correo electrónico fue validado correctamente.
+          {esAdmin
+            ? ' Tu cuenta tiene permisos de administrador y ya puedes ingresar.'
+            : ' Ya puedes volver a la aplicación. Si tu cuenta aún está pendiente, el administrador deberá aprobarla antes de que puedas revisar pórticos o reportar problemas.'}
+        </p>
+        <button className="login-button boton-ancho" onClick={() => { window.location.href = '/' }}>
+          Ir al mapa del Eruv
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function App() {
   const [sesion, setSesion] = useState<Session | null>(null)
   const [perfil, setPerfil] = useState<Perfil | null>(null)
@@ -87,6 +108,7 @@ export function App() {
   const [contrasena, setContrasena] = useState('')
   const [mensajeAuth, setMensajeAuth] = useState('')
   const [cargandoAuth, setCargandoAuth] = useState(false)
+  const esPantallaActivacion = window.location.pathname === '/cuenta-activada'
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSesion(data.session))
@@ -142,14 +164,14 @@ export function App() {
           password: contrasena,
           options: {
             data: { full_name: nombre.trim() },
-            emailRedirectTo: window.location.origin,
+            emailRedirectTo: `${window.location.origin}/cuenta-activada`,
           },
         })
         if (error) throw error
         setMensajeAuth(
           correo.trim().toLowerCase() === 'chechelnitzky@gmail.com'
-            ? 'Cuenta de administrador creada. Revisa tu correo si Supabase solicita confirmar la dirección.'
-            : 'Cuenta creada. Quedará pendiente de aprobación del administrador antes de poder revisar o reportar problemas.',
+            ? 'Cuenta de administrador creada. Revisa tu correo y confirma la dirección para activarla.'
+            : 'Cuenta creada. Revisa tu correo para validar la dirección. Después quedará pendiente de aprobación del administrador.',
         )
       } else {
         const { error } = await supabase.auth.signInWithPassword({
@@ -169,6 +191,10 @@ export function App() {
   const cerrarSesion = async () => {
     await supabase.auth.signOut()
     setPerfil(null)
+  }
+
+  if (esPantallaActivacion) {
+    return <PantallaCuentaActivada esAdmin={Boolean(perfil?.is_admin)} />
   }
 
   return (
