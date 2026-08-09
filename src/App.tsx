@@ -66,6 +66,7 @@ type Alerta = {
 
 type EstadoPortico = 'unreviewed' | 'ok' | 'problem'
 type ModoMapa = 'normal' | 'agregar' | 'mover'
+type VistaMapa = 'satelite' | 'mapa'
 
 const estilosEstado: Record<EstadoPortico, { color: string; fillColor: string; texto: string }> = {
   unreviewed: { color: '#737d78', fillColor: '#ffffff', texto: 'Sin revisar' },
@@ -201,6 +202,7 @@ export function App() {
   const [cargandoAuth, setCargandoAuth] = useState(false)
   const [modoMapa, setModoMapa] = useState<ModoMapa>('normal')
   const [porticoAMover, setPorticoAMover] = useState<Portico | null>(null)
+  const [vistaMapa, setVistaMapa] = useState<VistaMapa>('satelite')
   const [notificacionesActivas, setNotificacionesActivas] = useState(
     typeof Notification !== 'undefined' && Notification.permission === 'granted',
   )
@@ -673,14 +675,69 @@ export function App() {
       )}
 
       <main className={`map-wrap ${modoMapa !== 'normal' ? 'mapa-editando' : ''}`}>
+        <div
+          style={{
+            position: 'absolute',
+            zIndex: 1000,
+            top: 12,
+            right: 12,
+            display: 'flex',
+            gap: 4,
+            padding: 4,
+            borderRadius: 999,
+            background: 'rgba(255,255,255,.94)',
+            boxShadow: '0 4px 18px rgba(0,0,0,.18)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setVistaMapa('satelite')}
+            style={{
+              border: 0,
+              borderRadius: 999,
+              padding: '7px 10px',
+              background: vistaMapa === 'satelite' ? '#0f3d2e' : 'transparent',
+              color: vistaMapa === 'satelite' ? '#fff' : '#355247',
+              fontWeight: 800,
+              fontSize: 12,
+            }}
+          >
+            Satélite
+          </button>
+          <button
+            type="button"
+            onClick={() => setVistaMapa('mapa')}
+            style={{
+              border: 0,
+              borderRadius: 999,
+              padding: '7px 10px',
+              background: vistaMapa === 'mapa' ? '#0f3d2e' : 'transparent',
+              color: vistaMapa === 'mapa' ? '#fff' : '#355247',
+              fontWeight: 800,
+              fontSize: 12,
+            }}
+          >
+            Mapa
+          </button>
+        </div>
+
         <MapContainer center={[-33.3567, -70.5193]} zoom={14} scrollWheelZoom className="map" maxZoom={20}>
           <AjustarMapaAlEruv />
           <ClickMapa modo={modoMapa} onClick={manejarClickMapa} />
-          <TileLayer
-            attribution='&copy; OpenStreetMap contributors &copy; CARTO'
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-            maxZoom={20}
-          />
+
+          {vistaMapa === 'satelite' ? (
+            <TileLayer
+              attribution='Tiles &copy; Esri'
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={20}
+            />
+          ) : (
+            <TileLayer
+              attribution='&copy; OpenStreetMap contributors &copy; CARTO'
+              url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+              maxZoom={20}
+            />
+          )}
 
           {anilloEruv.length > 2 && (
             <Polygon
