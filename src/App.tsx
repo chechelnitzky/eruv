@@ -6,6 +6,7 @@ import {
   CircleMarker,
   GeoJSON,
   MapContainer,
+  Polygon,
   Popup,
   TileLayer,
   Tooltip,
@@ -71,6 +72,21 @@ const estilosEstado: Record<EstadoPortico, { color: string; fillColor: string; t
   ok: { color: '#138a58', fillColor: '#32b777', texto: 'Revisado OK' },
   problem: { color: '#c83d32', fillColor: '#e55345', texto: 'Pórtico con problemas' },
 }
+
+const anilloExterior: [number, number][] = [
+  [85, -180],
+  [85, 180],
+  [-85, 180],
+  [-85, -180],
+]
+
+const featureLimite = (eruvData as any).features.find(
+  (feature: any) => feature?.properties?.kind === 'boundary' && feature?.geometry?.type === 'Polygon',
+)
+
+const anilloEruv: [number, number][] = (featureLimite?.geometry?.coordinates?.[0] ?? []).map(
+  ([lng, lat]: [number, number]) => [lat, lng],
+)
 
 function contextoRevisionChile() {
   const partes = new Intl.DateTimeFormat('en-US', {
@@ -490,6 +506,31 @@ export function App() {
     if (!error) await cargarPorticos()
   }
 
+  const eliminarPortico = async (portico: Portico) => {
+    if (!perfil?.is_admin) return
+    const confirmar = window.confirm(
+      `¿Eliminar ${portico.name || portico.code}?\n\nEl punto dejará de aparecer en el mapa, pero conservaremos su historial de revisiones.`,
+    )
+    if (!confirmar) return
+
+    const { error } = await supabase
+      .from('porticos')
+      .update({ active: false })
+      .eq('id', portico.id)
+
+    if (error) {
+      setMensajeMapa(error.message || 'No se pudo eliminar el pórtico.')
+      return
+    }
+
+    if (porticoAMover?.id === portico.id) {
+      setPorticoAMover(null)
+      setModoMapa('normal')
+    }
+    setMensajeMapa(`${portico.code} fue eliminado del mapa.`)
+    await Promise.all([cargarPorticos(), cargarEstado()])
+  }
+
   const marcarPortico = async (portico: Portico, estado: 'ok' | 'problem') => {
     if (!sesion || !(perfil?.is_admin || perfil?.status === 'approved')) return
     let nota = ''
@@ -640,6 +681,15 @@ export function App() {
             url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
             maxZoom={20}
           />
+
+          {anilloEruv.length > 2 && (
+            <Polygon
+              positions={[anilloExterior, anilloEruv]}
+              interactive={false}
+              pathOptions={{ color: '#d74435', weight: 0, fillColor: '#d74435', fillOpacity: 0.2 }}
+            />
+          )}
+
           <GeoJSON data={eruvData as any} style={estiloTrazado} onEachFeature={(feature, layer) => layer.bindTooltip(nombreTramo(feature))} />
 
           {porticos.map((portico) => {
@@ -689,6 +739,7 @@ export function App() {
                             </button>
                             <button className="accion-neutra" onClick={() => editarNombrePortico(portico)}>Editar datos</button>
                             <button className="accion-neutra" onClick={() => restablecerPortico(portico)}>Sin revisar</button>
+                            <button className="accion-problema" onClick={() => eliminarPortico(portico)}>Eliminar pórtico</button>
                           </>
                         )}
                       </div>
@@ -701,7 +752,7 @@ export function App() {
             )
           })}
         </MapContainer>
-        <div className="map-note">Trazado georreferenciado desde el mapa original · La Dehesa, Lo Barnechea.</div>
+        <div className="map-note">Zona roja: fuera del Eruv · Trazado georreferenciado desde el mapa original.</div>
       </main>
 
       {perfil?.is_admin && (
